@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Code Agent — Dual-Agent Code Generation SaaS</title>
+    <meta name="description"
+        content="Submit any coding task and get production-ready code written by a Coder AI and reviewed by a Reviewer AI. Powered by Groq + CrewAI." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
+        rel="stylesheet" />
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #07071a;
+            --surface: #0f0f2e;
+            --card: #13132b;
+            --border: rgba(124, 58, 237, 0.2);
+            --purple: #7c3aed;
+            --purple-light: #a78bfa;
+            --cyan: #06b6d4;
+            --green: #10b981;
+            --yellow: #f59e0b;
+            --red: #ef4444;
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --radius: 12px;
+            --code-bg: #0d0d1f;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 2rem;
+            border-bottom: 1px solid var(--border);
+            background: rgba(7, 7, 26, 0.9);
+            backdrop-filter: blur(12px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--purple-light);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 1.5rem;
+            align-items: center;
+        }
+
+        .nav-links a {
+            color: var(--muted);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color .2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--text);
+        }
+
+        .btn {
+            padding: 0.5rem 1.2rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all .2s;
+        }
+
+        .btn-primary {
+            background: var(--purple);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #6d28d9;
+            transform: translateY(-1px);
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--purple-light);
+            border: 1px solid var(--border);
+        }
+
+        .btn-outline:hover {
+            background: rgba(124, 58, 237, 0.1);
+        }
+
+        .btn-sm {
+            padding: 0.35rem 0.9rem;
+            font-size: 0.8rem;
+        }
+
+        .hero {
+            text-align: center;
+            padding: 5rem 2rem 3rem;
+            background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124, 58, 237, 0.15), transparent);
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: rgba(124, 58, 237, 0.15);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            padding: 0.3rem 0.9rem;
+            font-size: 0.8rem;
+            color: var(--purple-light);
+            margin-bottom: 1.5rem;
+        }
+
+        .badge::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: .4
+            }
+        }
+
+        h1 {
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: 800;
+            line-height: 1.15;
+            margin-bottom: 1rem;
+        }
+
+        h1 span {
+            background: linear-gradient(135deg, var(--purple-light), var(--cyan));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: var(--muted);
+            font-size: 1.1rem;
+            max-width: 560px;
+            margin: 0 auto 2.5rem;
+            line-height: 1.6;
+        }
+
+        /* ── AGENT FLOW ── */
+        .agent-flow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 3rem;
+            flex-wrap: wrap;
+        }
+
+        .agent-box {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1rem 1.5rem;
+            text-align: center;
+            min-width: 140px;
+        }
+
+        .agent-box .icon {
+            font-size: 1.8rem;
+            margin-bottom: 0.3rem;
+        }
+
+        .agent-box .name {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--purple-light);
+        }
+
+        .agent-box .role {
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+
+        .arrow {
+            color: var(--purple-light);
+            font-size: 1.5rem;
+        }
+
+        /* ── TASK FORM ── */
+        .task-card {
+            max-width: 720px;
+            margin: 0 auto 4rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 2rem;
+            box-shadow: 0 0 60px rgba(124, 58, 237, 0.08);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+        }
+
+        .form-group label {
+            font-size: 0.8rem;
+            color: var(--muted);
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.65rem 0.9rem;
+            color: var(--text);
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color .2s;
+            font-family: inherit;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            border-color: var(--purple);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .form-group select option {
+            background: var(--surface);
+        }
+
+        .submit-row {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            margin-top: 1rem;
+        }
+
+        .api-key-input {
+            flex: 1;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.65rem 0.9rem;
+            color: var(--muted);
+            font-size: 0.85rem;
+            outline: none;
+        }
+
+        .api-key-input:focus {
+            border-color: var(--purple);
+            color: var(--text);
+        }
+
+        /* ── RESULT ── */
+        #result {
+            display: none;
+            margin-top: 1.5rem;
+        }
+
+        .job-status {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: var(--surface);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .status-dot.queued {
+            background: var(--yellow);
+        }
+
+        .status-dot.running {
+            background: var(--cyan);
+            animation: pulse 1s infinite;
+        }
+
+        .status-dot.completed {
+            background: var(--green);
+        }
+
+        .status-dot.failed {
+            background: var(--red);
+        }
+
+        .job-id {
+            font-size: 0.8rem;
+            color: var(--muted);
+            margin-left: auto;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .code-block {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .code-block pre {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            color: #c9d1d9;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .copy-btn {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+        }
+
+        .loader {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border);
+            border-top-color: var(--purple);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .error-msg {
+            display: none;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: var(--red);
+            font-size: 0.9rem;
+            margin-top: 1rem;
+        }
+
+        /* ── PRICING ── */
+        #pricing {
+            padding: 4rem 2rem;
+        }
+
+        #pricing h2 {
+            text-align: center;
+            font-size: 2rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+        }
+
+        .sub {
+            text-align: center;
+            color: var(--muted);
+            margin-bottom: 3rem;
+        }
+
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.5rem;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .pricing-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 2rem;
+            position: relative;
+            transition: transform .2s, box-shadow .2s;
+        }
+
+        .pricing-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 60px rgba(124, 58, 237, 0.15);
+        }
+
+        .pricing-card.featured {
+            border-color: var(--purple);
+        }
+
+        .featured-badge {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--purple);
+            color: white;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 0.2rem 0.8rem;
+            border-radius: 999px;
+            white-space: nowrap;
+        }
+
+        .plan-name {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--purple-light);
+            margin-bottom: 0.5rem;
+        }
+
+        .plan-price {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 0.25rem;
+        }
+
+        .plan-price span {
+            font-size: 1rem;
+            font-weight: 400;
+            color: var(--muted);
+        }
+
+        .plan-desc {
+            color: var(--muted);
+            font-size: 0.85rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .plan-features {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .plan-features li {
+            font-size: 0.9rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .plan-features li::before {
+            content: '✓';
+            color: var(--green);
+            flex-shrink: 0;
+        }
+
+        /* ── MODAL ── */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 200;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.open {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 2rem;
+            max-width: 420px;
+            width: 90%;
+        }
+
+        .modal h3 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+
+        .modal input {
+            width: 100%;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: var(--text);
+            font-size: 0.95rem;
+            outline: none;
+            margin-bottom: 1rem;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 0.75rem;
+            justify-content: flex-end;
+        }
+
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 2rem;
+            text-align: center;
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+
+        @media (max-width: 600px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .agent-flow {
+                flex-direction: column;
+            }
+
+            .arrow {
+                transform: rotate(90deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <nav>
+        <div class="logo">⚡ AI Code Agent</div>
+        <div class="nav-links">
+            <a href="#pricing">Pricing</a>
+            <a href="/docs" target="_blank">API Docs</a>
+            <button class="btn btn-primary" onclick="openModal('professional')">Get Started</button>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="badge">Powered by Groq + CrewAI</div>
+        <h1>Two AI Agents.<br /><span>One Perfect Codebase.</span></h1>
+        <p class="subtitle">Submit any coding task. Our Coder AI writes it, our Reviewer AI validates it. Get
+            production-ready code in under 60 seconds.</p>
+
+        <!-- AGENT FLOW -->
+        <div class="agent-flow">
+            <div class="agent-box">
+                <div class="icon">📝</div>
+                <div class="name">Your Task</div>
+                <div class="role">Natural language</div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="agent-box">
+                <div class="icon">👨‍💻</div>
+                <div class="name">Coder Agent</div>
+                <div class="role">Writes the code</div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="agent-box">
+                <div class="icon">🔍</div>
+                <div class="name">Reviewer Agent</div>
+                <div class="role">Reviews & fixes</div>
+            </div>
+            <div class="arrow">→</div>
+            <div class="agent-box">
+                <div class="icon">✅</div>
+                <div class="name">Final Code</div>
+                <div class="role">Production-ready</div>
+            </div>
+        </div>
+
+        <!-- TASK FORM -->
+        <div class="task-card">
+            <div class="form-row">
+                <div class="form-group" style="grid-column: 1/-1">
+                    <label>Task Description</label>
+                    <textarea id="taskDesc"
+                        placeholder="Build a REST API with FastAPI for user authentication with JWT tokens, password hashing, and refresh tokens..."></textarea>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Language</label>
+                    <select id="language">
+                        <option value="python">Python</option>
+                        <option value="javascript">JavaScript</option>
+                        <option value="typescript">TypeScript</option>
+                        <option value="go">Go</option>
+                        <option value="rust">Rust</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Framework (optional)</label>
+                    <input type="text" id="framework" placeholder="FastAPI, React, Express..." />
+                </div>
+            </div>
+            <div class="submit-row">
+                <input type="text" class="api-key-input" id="apiKey" placeholder="API Key (get one below)" />
+                <button class="btn btn-primary" onclick="submitTask()" id="submitBtn">Generate Code →</button>
+            </div>
+
+            <div class="loader" id="loader">
+                <div class="spinner"></div>
+                <p style="color:var(--muted);font-size:0.9rem;" id="loaderMsg">Submitting task to AI agents...</p>
+            </div>
+            <div class="error-msg" id="errorMsg"></div>
+
+            <!-- RESULT -->
+            <div id="result">
+                <div class="job-status">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText" style="font-size:0.9rem;font-weight:600;"></span>
+                    <span class="job-id" id="jobIdDisplay"></span>
+                </div>
+                <div class="code-block" id="codeBlock" style="display:none">
+                    <button class="btn btn-outline btn-sm copy-btn" onclick="copyCode()">Copy</button>
+                    <pre id="codeOutput"></pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- PRICING -->
+    <section id="pricing">
+        <h2>Simple Pricing</h2>
+        <p class="sub">Pay per month, cancel anytime</p>
+        <div class="pricing-grid">
+            <div class="pricing-card">
+                <div class="plan-name">Starter</div>
+                <div class="plan-price">$99<span>/mo</span></div>
+                <div class="plan-desc">For solo developers</div>
+                <ul class="plan-features">
+                    <li>20 AI tasks/month</li>
+                    <li>Coder + Reviewer agents</li>
+                    <li>Code download</li>
+                    <li>Email support</li>
+                </ul>
+                <button class="btn btn-outline" style="width:100%" onclick="openModal('starter')">Get Started</button>
+            </div>
+            <div class="pricing-card featured">
+                <div class="featured-badge">Most Popular</div>
+                <div class="plan-name">Professional</div>
+                <div class="plan-price">$199<span>/mo</span></div>
+                <div class="plan-desc">For serious developers</div>
+                <ul class="plan-features">
+                    <li>100 AI tasks/month</li>
+                    <li>Priority queue</li>
+                    <li>GitHub auto-commit</li>
+                    <li>Slack alerts</li>
+                    <li>Full API access</li>
+                </ul>
+                <button class="btn btn-primary" style="width:100%" onclick="openModal('professional')">Get
+                    Started</button>
+            </div>
+            <div class="pricing-card">
+                <div class="plan-name">Team</div>
+                <div class="plan-price">$499<span>/mo</span></div>
+                <div class="plan-desc">For development teams</div>
+                <ul class="plan-features">
+                    <li>Unlimited tasks</li>
+                    <li>5 team seats</li>
+                    <li>Custom agents</li>
+                    <li>Dedicated support</li>
+                    <li>SLA guarantee</li>
+                </ul>
+                <button class="btn btn-outline" style="width:100%" onclick="openModal('team')">Get Started</button>
+            </div>
+        </div>
+    </section>
+
+    <div class="modal-overlay" id="checkoutModal">
+        <div class="modal">
+            <h3>🚀 Start Your Subscription</h3>
+            <p style="color:var(--muted);font-size:0.9rem;margin-bottom:1rem;">Plan: <strong id="selectedPlan"
+                    style="color:var(--purple-light)"></strong></p>
+            <input type="email" id="checkoutEmail" placeholder="your@email.com" />
+            <div class="modal-actions">
+                <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="checkout()">Continue to Payment →</button>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>© 2025 AI Code Agent · Powered by Groq + CrewAI · <a href="/docs" style="color:var(--purple-light)">API
+                Docs</a></p>
+    </footer>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let selectedPlan = 'professional';
+        let currentJobId = null;
+        let pollInterval = null;
+
+        async function submitTask() {
+            const desc = document.getElementById('taskDesc').value.trim();
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const language = document.getElementById('language').value;
+            const framework = document.getElementById('framework').value.trim();
+
+            if (!desc) { showError('Please describe your coding task'); return; }
+
+            hideError();
+            showLoader(true, 'Submitting task to AI agents...');
+            document.getElementById('result').style.display = 'none';
+            document.getElementById('submitBtn').disabled = true;
+
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (apiKey) headers['X-API-Key'] = apiKey;
+
+                const res = await fetch(`${API_BASE}/generate`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ description: desc, language, framework: framework || null }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Submission failed');
+
+                currentJobId = data.job_id;
+                showResult({ status: 'queued', job_id: data.job_id });
+                showLoader(true, 'Agents are working on your code...');
+                startPolling(data.job_id, apiKey);
+            } catch (err) {
+                showError(err.message);
+                showLoader(false);
+                document.getElementById('submitBtn').disabled = false;
+            }
+        }
+
+        function startPolling(jobId, apiKey) {
+            if (pollInterval) clearInterval(pollInterval);
+            pollInterval = setInterval(async () => {
+                try {
+                    const headers = {};
+                    if (apiKey) headers['X-API-Key'] = apiKey;
+                    const res = await fetch(`${API_BASE}/jobs/${jobId}`, { headers });
+                    const data = await res.json();
+                    showResult(data);
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        clearInterval(pollInterval);
+                        showLoader(false);
+                        document.getElementById('submitBtn').disabled = false;
+                    }
+                } catch (e) { /* keep polling */ }
+            }, 2000);
+        }
+
+        function showResult(job) {
+            document.getElementById('result').style.display = 'block';
+            const dot = document.getElementById('statusDot');
+            dot.className = `status-dot ${job.status}`;
+            document.getElementById('statusText').textContent = job.status.charAt(0).toUpperCase() + job.status.slice(1);
+            document.getElementById('jobIdDisplay').textContent = `Job: ${(job.job_id || '').slice(0, 8)}...`;
+
+            if (job.status === 'completed' && job.result) {
+                document.getElementById('codeBlock').style.display = 'block';
+                document.getElementById('codeOutput').textContent = job.result.code || '';
+            } else if (job.status === 'failed') {
+                document.getElementById('codeBlock').style.display = 'none';
+                showError('Generation failed: ' + (job.error || 'Unknown error'));
+            }
+        }
+
+        function copyCode() {
+            const code = document.getElementById('codeOutput').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                const btn = document.querySelector('.copy-btn');
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = 'Copy', 2000);
+            });
+        }
+
+        function showLoader(v, msg) {
+            document.getElementById('loader').style.display = v ? 'block' : 'none';
+            if (msg) document.getElementById('loaderMsg').textContent = msg;
+        }
+        function showError(msg) { const el = document.getElementById('errorMsg'); el.textContent = msg; el.style.display = 'block'; }
+        function hideError() { document.getElementById('errorMsg').style.display = 'none'; }
+
+        function openModal(plan) {
+            selectedPlan = plan;
+            document.getElementById('selectedPlan').textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
+            document.getElementById('checkoutModal').classList.add('open');
+        }
+        function closeModal() { document.getElementById('checkoutModal').classList.remove('open'); }
+
+        async function checkout() {
+            const email = document.getElementById('checkoutEmail').value.trim();
+            if (!email || !email.includes('@')) { alert('Please enter a valid email'); return; }
+            try {
+                const res = await fetch(`${API_BASE}/checkout`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ plan: selectedPlan, email }),
+                });
+                const data = await res.json();
+                if (data.checkout_url) window.location.href = data.checkout_url;
+                else alert('Checkout error: ' + (data.detail || 'Unknown'));
+            } catch (err) { alert('Error: ' + err.message); }
+        }
+
+        document.getElementById('checkoutModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+    </script>
+</body>
+
+</html>
