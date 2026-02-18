@@ -15,9 +15,18 @@ from datetime import datetime
 from typing import Optional, Dict, List
 from fastapi import FastAPI, HTTPException, Depends, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from pydantic import BaseModel
 import uvicorn
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path for existing modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -94,9 +103,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Application starting up...")
+    logger.info(f"Available routes: {[route.path for route in app.routes]}")
+
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    logger.info("Health check endpoint accessed")
+    return JSONResponse(status_code=200, content={"status": "ok"})
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class TaskRequest(BaseModel):
