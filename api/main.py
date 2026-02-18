@@ -1,12 +1,15 @@
 """
-AI Code Agent — FastAPI Backend
+AI Code Agent — FastAPI Backend v2.0
 SaaS API for dual-agent AI code generation (Coder + Reviewer)
+Upgrades (R&D Week 1): token-bucket rate limiting, job caching, metrics
 """
 import os
 import sys
 import uuid
+import time
 import stripe
 import asyncio
+import hashlib
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, List
@@ -52,6 +55,30 @@ PLANS = {
 users_db: Dict[str, dict] = {}
 jobs_db: Dict[str, dict] = {}  # job_id → job data
 
+# ── R&D Upgrade: Token Bucket Rate Limiting ────────────────────────────────────
+class TokenBucket:
+    PLAN_RATES = {"starter": 0.03, "professional": 0.1, "team": 0.5}
+    PLAN_BURST = {"starter": 2, "professional": 5, "team": 20}
+
+    def __init__(self, plan: str = "starter"):
+        self.rate = self.PLAN_RATES.get(plan, 0.03)
+        self.capacity = self.PLAN_BURST.get(plan, 2)
+        self.tokens = float(self.capacity)
+        self.last_refill = time.time()
+
+    def consume(self) -> bool:
+        now = time.time()
+        self.tokens = min(self.capacity, self.tokens + (now - self.last_refill) * self.rate)
+        self.last_refill = now
+        if self.tokens >= 1:
+            self.tokens -= 1
+            return True
+        return False
+
+_rate_limiters: Dict[str, TokenBucket] = {}
+_total_jobs = 0
+_completed_jobs = 0
+
 # ── FastAPI App ───────────────────────────────────────────────────────────────
 app = FastAPI(
     title="AI Code Agent API",
@@ -90,6 +117,12 @@ def check_quota(user: dict = Depends(get_current_user)):
     used = user.get("tasks_this_month", 0)
     if limit != -1 and used >= limit:
         raise HTTPException(status_code=429, detail=f"Monthly quota exceeded ({used}/{limit}). Upgrade your plan.")
+    # R&D Upgrade: token-bucket rate limiting
+    api_key = user["api_key"]
+    if api_key not in _rate_limiters:
+        _rate_limiters[api_key] = TokenBucket(plan)
+    if not _rate_limiters[api_key].consume():
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Upgrade for higher limits.")
     return user
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -143,6 +176,8 @@ async def generate_code(
 
     # Increment usage
     user["tasks_this_month"] = user.get("tasks_this_month", 0) + 1
+    global _total_jobs
+    _total_jobs += 1
 
     # Run dual-agent in background
     background_tasks.add_task(run_dual_agent, job_id, full_description)
@@ -214,6 +249,8 @@ async def run_dual_agent(job_id: str, task_description: str):
             },
             "completed_at": datetime.utcnow().isoformat(),
         })
+        global _completed_jobs
+        _completed_jobs += 1
 
     except ImportError as e:
         # Groq not configured — return a demo response
@@ -318,6 +355,16 @@ async def payment_success():
     <p><a href="/">Go to Dashboard →</a></p></body></html>
     """)
 
+
+@app.get("/metrics")
+async def get_metrics():
+    return {
+        "total_jobs": _total_jobs,
+        "completed_jobs": _completed_jobs,
+        "active_jobs": sum(1 for j in jobs_db.values() if j["status"] in ["queued", "running"]),
+        "active_users": len(users_db),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
