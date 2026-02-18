@@ -7,6 +7,8 @@ import os
 import sys
 import uuid
 import time
+import secrets
+import tempfile
 import stripe
 import asyncio
 import hashlib
@@ -105,13 +107,8 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("Application starting up...")
+    logger.info("AI Code Agent API starting up...")
     logger.info(f"Available routes: {[route.path for route in app.routes]}")
-
-@app.get("/health")
-async def health():
-    logger.info("Health check endpoint accessed")
-    return JSONResponse(status_code=200, content={"status": "ok"})
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class TaskRequest(BaseModel):
@@ -220,7 +217,6 @@ async def run_dual_agent(job_id: str, task_description: str):
         from agents.coder import create_coder_agent
         from agents.reviewer import create_reviewer_agent
         from crewai import Crew, Task, Process
-        import tempfile
 
         llm = get_groq_llm(temperature=0.7)
         coder = create_coder_agent(llm)
@@ -349,7 +345,6 @@ async def stripe_webhook(request_body: bytes, stripe_signature: str = Header(Non
         session = event["data"]["object"]
         email = session.get("customer_email") or session.get("metadata", {}).get("email", "")
         plan = session.get("metadata", {}).get("plan", "starter")
-        import secrets
         api_key = f"aca_{secrets.token_urlsafe(32)}"
         users_db[api_key] = {
             "email": email,
@@ -359,7 +354,7 @@ async def stripe_webhook(request_body: bytes, stripe_signature: str = Header(Non
             "tasks_this_month": 0,
             "stripe_customer_id": session.get("customer"),
         }
-        print(f"✅ New user: {email} | Plan: {plan}")
+        logger.info(f"New user registered: {email} | Plan: {plan}")
     return {"received": True}
 
 
