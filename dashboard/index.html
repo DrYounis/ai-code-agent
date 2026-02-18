@@ -741,7 +741,7 @@
         const API_BASE = window.location.origin;
         let selectedPlan = 'professional';
         let currentJobId = null;
-        let pollInterval = null;
+        let activeWs = null; // WebSocket connection (replaces polling)
 
         async function submitTask() {
             const desc = document.getElementById('taskDesc').value.trim();
@@ -771,7 +771,7 @@
                 currentJobId = data.job_id;
                 showResult({ status: 'queued', job_id: data.job_id });
                 showLoader(true, 'Agents are working on your code...');
-                startPolling(data.job_id, apiKey);
+                startWebSocket(data.job_id);
             } catch (err) {
                 showError(err.message);
                 showLoader(false);
@@ -779,17 +779,54 @@
             }
         }
 
-        function startPolling(jobId, apiKey) {
-            if (pollInterval) clearInterval(pollInterval);
-            pollInterval = setInterval(async () => {
+        /**
+         * startWebSocket — 2025 pattern replacing 2-second setInterval polling.
+         * Connects to /ws/jobs/{jobId} and receives server-push updates instantly.
+         * Falls back to REST polling if WebSocket is unavailable (e.g. old proxy).
+         */
+        function startWebSocket(jobId) {
+            // Close any existing connection
+            if (activeWs) { activeWs.close(); activeWs = null; }
+
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            const wsUrl = `${proto}://${location.host}/ws/jobs/${jobId}`;
+
+            try {
+                activeWs = new WebSocket(wsUrl);
+
+                activeWs.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    showResult(data);
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        showLoader(false);
+                        document.getElementById('submitBtn').disabled = false;
+                        if (activeWs) { activeWs.close(); activeWs = null; }
+                    }
+                };
+
+                activeWs.onerror = () => {
+                    console.warn('WebSocket unavailable — falling back to polling');
+                    startPollingFallback(jobId);
+                };
+
+                activeWs.onclose = (e) => {
+                    if (e.code !== 1000) startPollingFallback(jobId);
+                };
+
+            } catch (e) {
+                startPollingFallback(jobId);
+            }
+        }
+
+        /** Fallback: REST polling at 2s intervals (used only if WebSocket fails) */
+        function startPollingFallback(jobId) {
+            const interval = setInterval(async () => {
                 try {
-                    const headers = {};
-                    if (apiKey) headers['X-API-Key'] = apiKey;
-                    const res = await fetch(`${API_BASE}/jobs/${jobId}`, { headers });
+                    const res = await fetch(`${API_BASE}/jobs/${jobId}`);
                     const data = await res.json();
                     showResult(data);
                     if (data.status === 'completed' || data.status === 'failed') {
-                        clearInterval(pollInterval);
+                        clearInterval(interval);
                         showLoader(false);
                         document.getElementById('submitBtn').disabled = false;
                     }

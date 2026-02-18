@@ -14,8 +14,8 @@ import asyncio
 import hashlib
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Dict, List
-from fastapi import FastAPI, HTTPException, Depends, Header, BackgroundTasks
+from typing import Optional, Dict, List, Set
+from fastapi import FastAPI, HTTPException, Depends, Header, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -368,6 +368,74 @@ async def payment_success():
     <p>Your subscription is active. Check your email for your API key.</p>
     <p><a href="/">Go to Dashboard →</a></p></body></html>
     """)
+
+
+# ── WebSocket: Real-time Job Updates (R&D Week 1 — replaces 90s polling) ──────
+
+class JobConnectionManager:
+    """Manages active WebSocket connections per job_id."""
+
+    def __init__(self):
+        self._connections: Dict[str, Set[WebSocket]] = {}
+
+    async def connect(self, job_id: str, ws: WebSocket):
+        await ws.accept()
+        self._connections.setdefault(job_id, set()).add(ws)
+        logger.info(f"WS connected: job={job_id} | active={len(self._connections[job_id])}")
+
+    def disconnect(self, job_id: str, ws: WebSocket):
+        if job_id in self._connections:
+            self._connections[job_id].discard(ws)
+            if not self._connections[job_id]:
+                del self._connections[job_id]
+
+    async def broadcast(self, job_id: str, data: dict):
+        """Push a job update to all listeners for that job."""
+        dead: list[WebSocket] = []
+        for ws in list(self._connections.get(job_id, [])):
+            try:
+                await ws.send_json(data)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(job_id, ws)
+
+
+ws_manager = JobConnectionManager()
+
+
+@app.websocket("/ws/jobs/{job_id}")
+async def websocket_job_updates(websocket: WebSocket, job_id: str):
+    """
+    WebSocket endpoint for real-time job status.
+
+    The client connects once and receives push updates instead of polling.
+    Automatically closes when the job reaches a terminal state.
+
+    Usage (JS):
+        const ws = new WebSocket(`wss://yourapp.com/ws/jobs/${jobId}`);
+        ws.onmessage = (e) => { const data = JSON.parse(e.data); showResult(data); };
+    """
+    await ws_manager.connect(job_id, websocket)
+    try:
+        # Send current state immediately on connect
+        if job_id in jobs_db:
+            await websocket.send_json(jobs_db[job_id])
+
+        # Stream updates until terminal state or client disconnect
+        while True:
+            await asyncio.sleep(0.5)
+            if job_id not in jobs_db:
+                await websocket.send_json({"error": "Job not found", "job_id": job_id})
+                break
+            job = jobs_db[job_id]
+            await websocket.send_json(job)
+            if job["status"] in ("completed", "failed"):
+                break  # Terminal state — close cleanly
+    except WebSocketDisconnect:
+        logger.info(f"WS client disconnected: job={job_id}")
+    finally:
+        ws_manager.disconnect(job_id, websocket)
 
 
 @app.get("/metrics")
