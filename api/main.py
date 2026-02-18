@@ -97,10 +97,14 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# CORS: allow_credentials=False required when allow_origins=["*"]
+# API key auth uses X-API-Key header (not cookies) so credentials=False is correct.
+# For cookie-based auth, replace ["*"] with specific origins from ALLOWED_ORIGINS env var.
+_allowed_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_allowed_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
