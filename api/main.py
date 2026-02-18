@@ -453,4 +453,6 @@ async def get_metrics():
     }
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
+    # Pass app object directly — avoids uvicorn string-import collision with
+    # dual-agent-system/main.py (crewai orchestrator) which is on sys.path
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8001)))
