@@ -1,12 +1,6 @@
-fastapi==0.111.0
+fastapi>=0.115.0
 uvicorn[standard]==0.29.0
 stripe==9.9.0
 python-dotenv==1.0.0
-crewai==0.86.0
-crewai-tools>=0.17.0
-langchain-groq>=0.2.1
-groq>=0.5.0
 pydantic==2.7.1
 python-multipart==0.0.9
-typer>=0.12.3
-instructor>=0.6.0
