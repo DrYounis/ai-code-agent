@@ -18,8 +18,9 @@ from typing import Optional, Dict, List, Set
 from fastapi import FastAPI, HTTPException, Depends, Header, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, EmailStr
 import uvicorn
+from fastapi import Request
 import logging
 
 # Configure logging
@@ -105,9 +106,21 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=False,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# SECURITY HEADERS
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Content-Security-Policy"] = "default-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://js.stripe.com; frame-src https://js.stripe.com;"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 @app.on_event("startup")
 async def startup_event():
@@ -116,14 +129,14 @@ async def startup_event():
 
 # ── Models ────────────────────────────────────────────────────────────────────
 class TaskRequest(BaseModel):
-    description: str
-    language: Optional[str] = "python"
-    framework: Optional[str] = None
-    requirements: Optional[List[str]] = []
+    description: str = Field(..., max_length=5000, description="The coding task description")
+    language: Optional[str] = Field("python", max_length=50)
+    framework: Optional[str] = Field(None, max_length=100)
+    requirements: Optional[List[str]] = Field([], max_length=20)
 
 class CheckoutRequest(BaseModel):
-    plan: str
-    email: str
+    plan: str = Field(..., max_length=20)
+    email: EmailStr
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 def get_current_user(x_api_key: str = Header(None)):
@@ -131,18 +144,25 @@ def get_current_user(x_api_key: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return users_db[x_api_key]
 
+def check_rate_limit(request: Request):
+    ip = request.client.host if request.client else "unknown"
+    if ip not in _rate_limiters:
+        _rate_limiters[ip] = TokenBucket(plan="starter")
+    if not _rate_limiters[ip].consume():
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+
 def check_quota(user: dict = Depends(get_current_user)):
     plan = user.get("plan", "starter")
     limit = PLANS.get(plan, PLANS["starter"])["tasks_per_month"]
     used = user.get("tasks_this_month", 0)
     if limit != -1 and used >= limit:
         raise HTTPException(status_code=429, detail=f"Monthly quota exceeded ({used}/{limit}). Upgrade your plan.")
-    # R&D Upgrade: token-bucket rate limiting
+    # Rate limiting on API keys
     api_key = user["api_key"]
     if api_key not in _rate_limiters:
         _rate_limiters[api_key] = TokenBucket(plan)
     if not _rate_limiters[api_key].consume():
-        raise HTTPException(status_code=429, detail="Rate limit exceeded. Upgrade for higher limits.")
+        raise HTTPException(status_code=429, detail="Burst rate limit exceeded. Upgrade for higher limits.")
     return user
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -315,7 +335,7 @@ async def list_jobs(user: dict = Depends(get_current_user)):
     }
 
 
-@app.post("/checkout")
+@app.post("/checkout", dependencies=[Depends(check_rate_limit)])
 async def create_checkout(request: CheckoutRequest):
     plan = request.plan.lower()
     if plan not in PLANS:
