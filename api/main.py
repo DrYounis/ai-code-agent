@@ -9,7 +9,8 @@ import uuid
 import time
 import secrets
 import tempfile
-import stripe
+import base64
+import requests
 import asyncio
 import hashlib
 from pathlib import Path
@@ -34,30 +35,26 @@ logger = logging.getLogger(__name__)
 # Add parent directory to path for existing modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# ── Stripe Setup ──────────────────────────────────────────────────────────────
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+# ── Moyasar Setup ──────────────────────────────────────────────────────────────
+MOYASAR_SECRET_KEY = os.getenv("MOYASAR_SECRET_KEY", "")
 
 # ── Plans ─────────────────────────────────────────────────────────────────────
 PLANS = {
     "starter": {
         "name": "Starter",
-        "price": 99,
-        "price_id": os.getenv("STRIPE_STARTER_PRICE_ID", ""),
+        "price": 390,
         "tasks_per_month": 20,
         "features": ["20 AI tasks/month", "Coder + Reviewer agents", "Code download", "Email support"],
     },
     "professional": {
         "name": "Professional",
-        "price": 199,
-        "price_id": os.getenv("STRIPE_PRO_PRICE_ID", ""),
+        "price": 790,
         "tasks_per_month": 100,
         "features": ["100 AI tasks/month", "Priority queue", "GitHub auto-commit", "Slack alerts", "API access"],
     },
     "team": {
         "name": "Team",
-        "price": 499,
-        "price_id": os.getenv("STRIPE_TEAM_PRICE_ID", ""),
+        "price": 1490,
         "tasks_per_month": -1,
         "features": ["Unlimited tasks", "5 team seats", "Custom agents", "Dedicated support", "SLA guarantee"],
     },
@@ -118,7 +115,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Content-Security-Policy"] = "default-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://js.stripe.com; frame-src https://js.stripe.com;"
+    response.headers["Content-Security-Policy"] = "default-src 'self' api.moyasar.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src api.moyasar.com;"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
 
@@ -337,59 +334,74 @@ async def list_jobs(user: dict = Depends(get_current_user)):
 
 @app.post("/checkout", dependencies=[Depends(check_rate_limit)])
 async def create_checkout(request: CheckoutRequest):
+    """Create a Moyasar payment invoice"""
     plan = request.plan.lower()
     if plan not in PLANS:
         raise HTTPException(status_code=400, detail=f"Invalid plan: {plan}")
-    price_id = PLANS[plan]["price_id"]
-    if not price_id:
-        raise HTTPException(status_code=500, detail="Stripe price ID not configured")
+    
+    plan_info = PLANS[plan]
+    amount = plan_info["price"] * 100  # Moyasar expects amount in Halalas
+    
+    base_url = os.getenv("BASE_URL", "http://localhost:8001")
+    callback_url = f"{base_url}/success?plan={plan}&email={request.email}"
+    
+    auth_token = base64.b64encode(f"{MOYASAR_SECRET_KEY}:".encode()).decode()
+    headers = {
+        "Authorization": f"Basic {auth_token}",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    
+    data = {
+        "amount": amount,
+        "currency": "SAR",
+        "description": f"AI Code Agent {plan.capitalize()} Plan",
+        "callback_url": callback_url
+    }
+    
     try:
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            mode="subscription",
-            customer_email=request.email,
-            line_items=[{"price": price_id, "quantity": 1}],
-            success_url=os.getenv("BASE_URL", "http://localhost:8000") + "/success?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=os.getenv("BASE_URL", "http://localhost:8000") + "/#pricing",
-            metadata={"plan": plan, "email": request.email},
-        )
-        return {"checkout_url": session.url, "session_id": session.id}
-    except stripe.error.StripeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/webhook")
-async def stripe_webhook(request_body: bytes, stripe_signature: str = Header(None)):
-    try:
-        event = stripe.Webhook.construct_event(request_body, stripe_signature, STRIPE_WEBHOOK_SECRET)
+        resp = requests.post("https://api.moyasar.com/v1/invoices", headers=headers, data=data)
+        if not resp.ok:
+            raise HTTPException(status_code=400, detail=f"Moyasar Error: {resp.text}")
+        invoice = resp.json()
+        return {"checkout_url": invoice["url"]}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        email = session.get("customer_email") or session.get("metadata", {}).get("email", "")
-        plan = session.get("metadata", {}).get("plan", "starter")
-        api_key = f"aca_{secrets.token_urlsafe(32)}"
-        users_db[api_key] = {
-            "email": email,
-            "plan": plan,
-            "api_key": api_key,
-            "created_at": datetime.utcnow().isoformat(),
-            "tasks_this_month": 0,
-            "stripe_customer_id": session.get("customer"),
-        }
-        logger.info(f"New user registered: {email} | Plan: {plan}")
-    return {"received": True}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/success")
-async def payment_success():
-    return HTMLResponse("""
+async def payment_success(id: str, status: str, plan: str = "starter", email: str = ""):
+    """Post-payment success logic verified by Moyasar invoice status"""
+    if status != "paid":
+        return HTMLResponse("<h1>Payment Failed or Cancelled</h1><p><a href='/'>Go back</a></p>", status_code=400)
+        
+    auth_token = base64.b64encode(f"{MOYASAR_SECRET_KEY}:".encode()).decode()
+    headers = {"Authorization": f"Basic {auth_token}"}
+    
+    try:
+        resp = requests.get(f"https://api.moyasar.com/v1/invoices/{id}", headers=headers)
+        if not resp.ok or resp.json().get("status") != "paid":
+            return HTMLResponse("<h1>Invoice Verification Failed</h1><p><a href='/'>Go back</a></p>", status_code=400)
+    except Exception:
+        return HTMLResponse("<h1>Error verifying payment</h1><p><a href='/'>Go back</a></p>", status_code=500)
+        
+    # Provision new user on successful payment
+    api_key = f"aca_{secrets.token_urlsafe(32)}"
+    users_db[api_key] = {
+        "email": email,
+        "plan": plan,
+        "api_key": api_key,
+        "created_at": datetime.utcnow().isoformat(),
+        "tasks_this_month": 0,
+    }
+    logger.info(f"New ACA user registered via Moyasar: {email} | Plan: {plan}")
+    
+    return HTMLResponse(f"""
     <html><head><title>Welcome!</title>
-    <style>body{font-family:sans-serif;text-align:center;padding:80px;background:#07071a;color:white;}
-    h1{color:#7c3aed;} a{color:#7c3aed;}</style></head>
+    <style>body{{font-family:sans-serif;text-align:center;padding:80px;background:#07071a;color:white;}}
+    h1{{color:#7c3aed;}} a{{color:#7c3aed;}} .api-key-box{{background:#1a1a2e;padding:15px;border-radius:8px;display:inline-block;margin:20px 0;font-family:monospace;}}</style></head>
     <body><h1>🎉 Welcome to AI Code Agent!</h1>
-    <p>Your subscription is active. Check your email for your API key.</p>
+    <p>Your subscription is active. Here is your secret API key:</p>
+    <div class="api-key-box"><strong>{api_key}</strong></div>
     <p><a href="/">Go to Dashboard →</a></p></body></html>
     """)
 
